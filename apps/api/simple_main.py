@@ -1,6 +1,7 @@
 """Simplified FastAPI application for FUB Follow-up Assistant.
 
 This is a minimal version that bypasses SQLModel issues and uses direct database queries.
+Railway deployment version.
 """
 
 import asyncio
