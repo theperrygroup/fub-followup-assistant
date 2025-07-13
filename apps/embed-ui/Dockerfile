@@ -1,4 +1,7 @@
-FROM node:18
+FROM node:18-alpine
+
+# Install basic shell utilities including coreutils (which provides cd)
+RUN apk add --no-cache bash coreutils
 
 # Set working directory
 WORKDIR /app
