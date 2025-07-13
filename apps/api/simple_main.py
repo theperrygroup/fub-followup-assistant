@@ -368,38 +368,45 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
         try:
             context_data = json.loads(request.context)
         except json.JSONDecodeError:
-            logger.error(f"Invalid JSON in context: {request.context[:100]}...")
+            logger.error(f"Failed to parse context JSON: {request.context}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid context format"
+                detail="Invalid context data"
             )
         
-        # Extract FUB account ID from context
-        fub_account_id = context_data.get("account", {}).get("id")
+        account_data = context_data.get("account", {})
+        fub_account_id = str(account_data.get("id"))
+        
         if not fub_account_id:
-            logger.error("No account ID found in context")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing account ID in context"
             )
         
-        # Create or update account
-        account = await create_or_update_account(str(fub_account_id))
+        # Create or get account
+        account = await create_or_update_account(
+            fub_account_id=fub_account_id,
+            domain=account_data.get("domain", ""),
+            owner_name=account_data.get("owner", {}).get("name", ""),
+            owner_email=account_data.get("owner", {}).get("email", "")
+        )
+        
         if not account:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create or update account"
+                detail="Failed to create account"
             )
         
         # Create JWT token
-        token = create_jwt_token(account["account_id"], account["fub_account_id"])
-        
-        logger.info(f"Successfully authenticated FUB account: {fub_account_id}")
+        token = create_jwt_token(
+            account_id=account["id"],
+            fub_account_id=fub_account_id
+        )
         
         return IframeLoginResponse(
-            account_id=account["account_id"],
-            fub_account_id=account["fub_account_id"],
-            subscription_status=account["subscription_status"],
+            account_id=account["id"],
+            fub_account_id=fub_account_id,
+            subscription_status="active",
             token=token
         )
         
@@ -411,6 +418,12 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication failed"
         )
+
+
+@app.post("/auth/fub/callback", response_model=IframeLoginResponse)
+async def fub_callback(request: IframeLoginRequest) -> IframeLoginResponse:
+    """FUB callback endpoint - alias to iframe_login for FUB compatibility."""
+    return await iframe_login(request)
 
 
 @app.post("/api/v1/fub/note")
