@@ -27,16 +27,28 @@ function App() {
   const [isTyping, setIsTyping] = useState(false)
 
   useEffect(() => {
+    console.log('App starting - checking URL parameters...')
+    console.log('Current URL:', window.location.href)
+    console.log('Search params:', window.location.search)
+    
     // Parse URL parameters
     const urlParams = new URLSearchParams(window.location.search)
     const context = urlParams.get('context')
     const signature = urlParams.get('signature')
 
+    console.log('URL params found:', { 
+      hasContext: !!context, 
+      hasSignature: !!signature,
+      contextLength: context?.length || 0,
+      signatureLength: signature?.length || 0
+    })
+
     if (!context || !signature) {
+      console.warn('Missing authentication parameters')
       setAuthState({
         isLoading: false,
         isAuthenticated: false,
-        error: 'Missing authentication parameters'
+        error: 'Missing authentication parameters (context or signature not found in URL)'
       })
       return
     }
@@ -47,8 +59,14 @@ function App() {
 
   const authenticateWithBackend = async (context: string, signature: string) => {
     try {
+      console.log('Starting authentication...')
+      console.log('Context length:', context.length)
+      console.log('Signature length:', signature.length)
+      console.log('Context (first 100 chars):', context.substring(0, 100))
+      console.log('Signature:', signature)
+      
       // Send the original base64 context for HMAC verification
-      const response = await fetch('https://fub-followup-assistant-production.up.railway.app/auth/fub/callback', {
+      const response = await fetch('https://fub-followup-assistant-production.up.railway.app/auth/callback', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -56,16 +74,31 @@ function App() {
         body: JSON.stringify({ context, signature })
       })
 
+      console.log('Response status:', response.status)
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()))
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || 'Authentication failed')
+        const errorText = await response.text()
+        console.error('Authentication failed - Response text:', errorText)
+        
+        let errorData: any = {}
+        try {
+          errorData = JSON.parse(errorText)
+        } catch (e) {
+          console.error('Could not parse error response as JSON')
+        }
+        
+        throw new Error(errorData.detail || errorText || 'Authentication failed')
       }
 
       const data = await response.json()
+      console.log('Authentication successful:', data)
       
       // Decode the base64 context locally to get lead info
       const decodedContext = atob(context)
       const contextData = JSON.parse(decodedContext)
+      console.log('Decoded context data:', contextData)
+      
       const person = contextData.person
 
       setAuthState({

@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = Field(..., alias="STRIPE_WEBHOOK_SECRET")
     
     # Optional settings with defaults
-    cors_origins: list[str] = Field(default_factory=lambda: ["*.followupboss.com"])
+    cors_origins: list[str] = Field(default_factory=lambda: ["https://*.followupboss.com", "http://localhost:*"])
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     rate_limit_requests_per_minute: int = Field(default=10, alias="RATE_LIMIT_RPM")
     rate_limit_requests_per_minute_ip: int = Field(default=100, alias="RATE_LIMIT_RPM_IP")

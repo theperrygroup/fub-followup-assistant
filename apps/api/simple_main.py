@@ -26,11 +26,19 @@ from config import settings
 def verify_hmac_signature(context: str, signature: str) -> bool:
     """Verify HMAC signature from Follow Up Boss iframe."""
     try:
+        # Use the same secret key as the working app for testing
+        secret_key = "a63b35dfb1fcc2fb0511141ed7e34ef3"
+        
         expected_signature = hmac.new(
-            settings.fub_embed_secret.encode(),
+            secret_key.encode(),
             context.encode(),
             hashlib.sha256
         ).hexdigest()
+        
+        logger.info(f"Context (first 100 chars): {context[:100]}")
+        logger.info(f"Provided signature: {signature}")
+        logger.info(f"Expected signature: {expected_signature}")
+        logger.info(f"Signatures match: {hmac.compare_digest(signature, expected_signature)}")
         
         return hmac.compare_digest(signature, expected_signature)
     except Exception as e:
@@ -426,7 +434,7 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
         )
 
 
-@app.post("/auth/fub/callback", response_model=IframeLoginResponse)
+@app.post("/auth/callback", response_model=IframeLoginResponse)
 async def fub_callback(request: IframeLoginRequest) -> IframeLoginResponse:
     """FUB callback endpoint - alias to iframe_login for FUB compatibility."""
     return await iframe_login(request)
