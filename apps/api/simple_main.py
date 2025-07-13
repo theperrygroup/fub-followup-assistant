@@ -225,15 +225,7 @@ async def root() -> Dict[str, str]:
         "status": "running"
     }
 
-# Debug endpoint
-@app.get("/debug/config")
-async def debug_config() -> Dict[str, str]:
-    """Debug endpoint to check configuration values."""
-    return {
-        "fub_embed_secret_length": str(len(settings.fub_embed_secret)),
-        "fub_embed_secret": settings.fub_embed_secret[:8] + "..." + settings.fub_embed_secret[-8:],
-        "environment": settings.app_env,
-    }
+
 
 @app.post("/api/v1/setup-db")
 async def setup_database() -> Dict[str, Any]:
@@ -428,12 +420,9 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
         raise
     except Exception as e:
         logger.error(f"Iframe login error: {e}")
-        logger.error(f"Error type: {type(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Authentication failed: {str(e)}"
+            detail="Authentication failed"
         )
 
 
