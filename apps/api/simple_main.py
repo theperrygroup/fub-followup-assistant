@@ -5,6 +5,7 @@ Railway deployment version.
 """
 
 import asyncio
+import contextlib
 from typing import Dict, Any
 
 import asyncpg
@@ -12,28 +13,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 
-# Create FastAPI application
-app = FastAPI(
-    title="FUB Follow-up Assistant API",
-    description="AI-powered follow-up assistant for Follow Up Boss CRM",
-    version="1.0.0",
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
-)
-
 # Database connection pool
 db_pool = None
 
-@app.on_event("startup")
-async def startup():
-    """Initialize database connection pool."""
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle startup and shutdown events."""
+    # Startup
     global db_pool
     # Parse the DATABASE_URL to extract connection parameters
     import urllib.parse as urlparse
@@ -49,13 +35,29 @@ async def startup():
         max_size=5
     )
     print("✅ Database connection pool created")
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Close database connection pool."""
-    global db_pool
+    
+    yield
+    
+    # Shutdown
     if db_pool:
         await db_pool.close()
+
+# Create FastAPI application
+app = FastAPI(
+    title="FUB Follow-up Assistant API",
+    description="AI-powered follow-up assistant for Follow Up Boss CRM",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*"],
+)
 
 # Health check endpoint
 @app.get("/health")
