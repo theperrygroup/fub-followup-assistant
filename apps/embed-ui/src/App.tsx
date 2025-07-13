@@ -1,55 +1,28 @@
-import { useEffect, useState } from 'react'
-import { useAuth, useFubContext } from '@fub-assistant/shared'
-import { AuthScreen } from './components/AuthScreen'
-import { ChatInterface } from './components/ChatInterface'
-import { LoadingScreen } from './components/LoadingScreen'
-import { SubscriptionRequiredScreen } from './components/SubscriptionRequiredScreen'
+import { useState } from 'react'
 
 function App() {
-  const { isAuthenticated, isLoading, account, login } = useAuth()
-  const { context } = useFubContext()
-  const [isInitializing, setIsInitializing] = useState(true)
+  const [isLoading] = useState(true)
 
-  useEffect(() => {
-    // Mark as initialized after a short delay to allow hooks to settle
-    const timer = setTimeout(() => {
-      setIsInitializing(false)
-    }, 100)
-    
-    return () => clearTimeout(timer)
-  }, [])
-
-  const handleLogin = async (contextData: string, signature: string) => {
-    try {
-      await login(contextData, signature)
-    } catch (error) {
-      console.error('Login failed:', error)
-    }
-  }
-
-  // Show loading while initializing
-  if (isInitializing || isLoading) {
-    return <LoadingScreen />
-  }
-
-  // Show auth screen if not authenticated
-  if (!isAuthenticated) {
+  if (isLoading) {
     return (
-      <AuthScreen 
-        onLogin={handleLogin}
-        context={context}
-      />
+      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-blue-50 to-white">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <h2 className="text-lg font-semibold text-gray-700 mb-2">FUB Follow-up Assistant</h2>
+          <p className="text-sm text-gray-500">Loading embed interface...</p>
+          <p className="text-xs text-gray-400 mt-4">
+            API: https://fub-followup-assistant-production.up.railway.app
+          </p>
+        </div>
+      </div>
     )
   }
 
-  // Check subscription status
-  if (account?.subscription_status !== 'active' && 
-      account?.subscription_status !== 'trialing') {
-    return <SubscriptionRequiredScreen />
-  }
-
-  // Show main chat interface
-  return <ChatInterface />
+  return (
+    <div className="flex items-center justify-center h-screen">
+      <h1>FUB Chat Interface</h1>
+    </div>
+  )
 }
 
 export default App 
