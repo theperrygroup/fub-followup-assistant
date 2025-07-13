@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from jose import JWTError, jwt
 from loguru import logger
 from pydantic import BaseModel, Field
+import os
 
 from config import settings
 
@@ -26,8 +27,8 @@ from config import settings
 def verify_hmac_signature(context: str, signature: str) -> bool:
     """Verify HMAC signature from Follow Up Boss iframe."""
     try:
-        # Use the same secret key as the working app for testing
-        secret_key = "a63b35dfb1fcc2fb0511141ed7e34ef3"
+        # Use the correct secret key for this app - fallback to hardcoded value if env var not set
+        secret_key = os.environ.get('FUB_EMBED_SECRET', 'bbf8210af8db10b5a78ae3f01a4e61fc')
         
         expected_signature = hmac.new(
             secret_key.encode(),
