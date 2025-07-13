@@ -6,12 +6,17 @@ WORKDIR /app
 # Copy package files
 COPY package.json ./
 
-# Install dependencies (including express)
-RUN npm install --production
+# Install all dependencies (including dev dependencies for building)
+RUN npm install
 
-# Copy the pre-built dist directory and server
-COPY dist/ ./dist/
-COPY server.js ./
+# Copy source code
+COPY . .
+
+# Build the React app
+RUN npm run build
+
+# Remove dev dependencies to reduce image size
+RUN npm prune --production
 
 # Expose port
 EXPOSE 3000
