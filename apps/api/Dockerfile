@@ -18,8 +18,8 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy API application code
-COPY . /app/
+# Copy API application code from the correct subdirectory
+COPY apps/api/ /app/
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
