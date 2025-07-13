@@ -47,7 +47,7 @@ function App() {
 
   const authenticateWithBackend = async (context: string, signature: string) => {
     try {
-      const response = await fetch('https://fub-followup-assistant-production.up.railway.app/api/v1/auth/iframe-login', {
+      const response = await fetch('https://fub-followup-assistant-production.up.railway.app/auth/fub/callback', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -56,7 +56,8 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error('Authentication failed')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || 'Authentication failed')
       }
 
       const data = await response.json()
@@ -86,10 +87,11 @@ function App() {
       }])
 
     } catch (error) {
+      console.error('Authentication error:', error)
       setAuthState({
         isLoading: false,
         isAuthenticated: false,
-        error: 'Failed to authenticate with FUB'
+        error: error instanceof Error ? error.message : 'Failed to authenticate with FUB'
       })
     }
   }
