@@ -1,21 +1,19 @@
 """Main FastAPI application for FUB Follow-up Assistant.
 
-This module sets up the FastAPI application with all routes, middleware,
-CORS configuration, and database initialization.
+This module sets up the FastAPI application with working database connectivity.
 """
 
 import sys
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+import asyncio
+from typing import Dict, Any
 
+import asyncpg
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
-from sqlmodel import SQLModel, create_engine
 
 from config import settings
-from routes import auth, chat, fub, stripe_webhook
 
 
 # Configure logging
@@ -27,46 +25,17 @@ logger.add(
     serialize=True if settings.app_env == "prod" else False
 )
 
-
-# Database engine
-engine = create_engine(settings.database_url)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager.
-    
-    Handles startup and shutdown events for the FastAPI application.
-    
-    Args:
-        app: FastAPI application instance.
-        
-    Yields:
-        None during application runtime.
-    """
-    # Startup
-    logger.info("Starting FUB Follow-up Assistant API")
-    
-    # Database tables are already created via init.sql, so skip auto-creation
-    # SQLModel.metadata.create_all(engine)
-    logger.info("Using existing database schema")
-    
-    yield
-    
-    # Shutdown
-    logger.info("Shutting down FUB Follow-up Assistant API")
-
+# Database connection pool
+db_pool = None
 
 # Create FastAPI application
 app = FastAPI(
     title="FUB Follow-up Assistant API",
     description="AI-powered follow-up assistant for Follow Up Boss CRM",
     version="1.0.0",
-    lifespan=lifespan,
     docs_url="/docs" if settings.app_env != "prod" else None,
     redoc_url="/redoc" if settings.app_env != "prod" else None
 )
-
 
 # CORS middleware
 app.add_middleware(
@@ -82,127 +51,186 @@ app.add_middleware(
 )
 
 
-# Content Security Policy middleware
+@app.on_event("startup")
+async def startup():
+    """Initialize database connection pool."""
+    global db_pool
+    logger.info("Starting FUB Follow-up Assistant API")
+    
+    # Parse the DATABASE_URL to extract connection parameters
+    import urllib.parse as urlparse
+    url = urlparse.urlparse(settings.database_url)
+    
+    try:
+        db_pool = await asyncpg.create_pool(
+            host=url.hostname,
+            port=url.port,
+            user=url.username,
+            password=url.password,
+            database=url.path[1:],  # Remove leading '/'
+            min_size=1,
+            max_size=5
+        )
+        logger.info("✅ Database connection pool created")
+    except Exception as e:
+        logger.error(f"❌ Failed to create database pool: {e}")
+        raise
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Close database connection pool."""
+    global db_pool
+    if db_pool:
+        await db_pool.close()
+    logger.info("Shutting down FUB Follow-up Assistant API")
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
-    """Add security headers to all responses.
-    
-    Args:
-        request: FastAPI request object.
-        call_next: Next middleware in chain.
-        
-    Returns:
-        Response with security headers.
-    """
+    """Add security headers to all responses."""
     response = await call_next(request)
-    
-    # Content Security Policy for iframe embedding
-    response.headers["Content-Security-Policy"] = "frame-ancestors *.followupboss.com"
-    
-    # Other security headers
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
 
 
-# Request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next) -> Response:
-    """Log all incoming requests.
+    """Log incoming requests."""
+    start_time = asyncio.get_event_loop().time()
     
-    Args:
-        request: FastAPI request object.
-        call_next: Next middleware in chain.
-        
-    Returns:
-        Response after processing.
-    """
-    client_ip = request.client.host if request.client else "unknown"
+    # Log request
+    logger.info(f"🌐 {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
     
-    logger.info(
-        f"Request: {request.method} {request.url.path} from {client_ip}",
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "client_ip": client_ip,
-            "user_agent": request.headers.get("user-agent", "unknown")
-        }
-    )
-    
-    response = await call_next(request)
-    
-    logger.info(
-        f"Response: {response.status_code} for {request.method} {request.url.path}",
-        extra={
-            "status_code": response.status_code,
-            "method": request.method,
-            "path": request.url.path
-        }
-    )
-    
-    return response
+    # Process request
+    try:
+        response = await call_next(request)
+        duration = asyncio.get_event_loop().time() - start_time
+        logger.info(f"✅ {request.method} {request.url.path} -> {response.status_code} ({duration:.3f}s)")
+        return response
+    except Exception as e:
+        duration = asyncio.get_event_loop().time() - start_time
+        logger.error(f"❌ {request.method} {request.url.path} -> ERROR ({duration:.3f}s): {e}")
+        raise
 
 
-# Exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Global exception handler for unhandled errors.
-    
-    Args:
-        request: FastAPI request object.
-        exc: Exception that occurred.
-        
-    Returns:
-        JSON error response.
-    """
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    
+    """Global exception handler."""
+    logger.error(f"Unhandled exception in {request.method} {request.url.path}: {exc}")
     return JSONResponse(
         status_code=500,
         content={
             "detail": "Internal server error",
-            "error_id": f"error_{id(exc)}"
+            "type": "internal_error",
+            "request_id": request.headers.get("x-request-id", "unknown")
         }
     )
 
 
-# Health check endpoint
 @app.get("/health")
-async def health_check() -> dict:
-    """Health check endpoint.
+async def health_check() -> Dict[str, str]:
+    """Health check endpoint."""
+    global db_pool
     
-    Returns:
-        Health status information.
-    """
+    status = "healthy"
+    db_status = "connected"
+    
+    # Test database connection
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}")
+            status = "unhealthy"
+            db_status = "disconnected"
+    else:
+        status = "unhealthy"
+        db_status = "no_pool"
+    
     return {
-        "status": "healthy",
+        "status": status,
         "service": "fub-followup-assistant-api",
         "version": "1.0.0",
-        "environment": settings.app_env
+        "environment": settings.app_env,
+        "database": db_status
     }
 
 
-# Include routers
-app.include_router(auth.router, prefix="/api/v1")
-app.include_router(chat.router, prefix="/api/v1")
-app.include_router(fub.router, prefix="/api/v1")
-app.include_router(stripe_webhook.router, prefix="/api/v1")
-
-
-# Root endpoint
 @app.get("/")
-async def root() -> dict:
-    """Root endpoint.
-    
-    Returns:
-        API information.
-    """
+async def root() -> Dict[str, str]:
+    """Root endpoint."""
     return {
         "message": "FUB Follow-up Assistant API",
         "version": "1.0.0",
-        "docs": "/docs" if settings.app_env != "prod" else "Documentation disabled in production"
+        "status": "running"
+    }
+
+
+@app.get("/api/v1/test-db")
+async def test_database() -> Dict[str, Any]:
+    """Test database connectivity and return sample data."""
+    global db_pool
+    
+    if not db_pool:
+        return {"error": "Database pool not initialized"}
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Test basic connectivity
+            test_result = await conn.fetchval("SELECT 1 as test")
+            
+            # Get table info
+            tables = await conn.fetch("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """)
+            
+            # Get account count
+            account_count = await conn.fetchval("SELECT COUNT(*) FROM accounts")
+            
+            return {
+                "database_test": test_result,
+                "tables": [row["table_name"] for row in tables],
+                "account_count": account_count,
+                "status": "connected"
+            }
+    except Exception as e:
+        logger.error(f"Database test failed: {e}")
+        return {"error": str(e), "status": "failed"}
+
+
+# Basic authentication endpoints
+@app.post("/api/v1/auth/iframe-login")
+async def iframe_login() -> Dict[str, str]:
+    """Placeholder iframe login endpoint."""
+    return {
+        "message": "Iframe login endpoint - implementation needed",
+        "status": "placeholder"
+    }
+
+
+@app.post("/api/v1/fub/note")
+async def create_fub_note() -> Dict[str, str]:
+    """Placeholder FUB note creation endpoint."""
+    return {
+        "message": "FUB note creation endpoint - implementation needed", 
+        "status": "placeholder"
+    }
+
+
+@app.post("/api/v1/chat/message")
+async def chat_message() -> Dict[str, str]:
+    """Placeholder chat message endpoint."""
+    return {
+        "message": "Chat message endpoint - implementation needed",
+        "status": "placeholder"
     }
 
 

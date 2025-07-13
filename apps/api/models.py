@@ -51,7 +51,7 @@ class Account(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime(timezone=True), onupdate=func.now()))
     
     # Primary key
-    account_id: int = Field(primary_key=True)
+    account_id: Optional[int] = Field(default=None, primary_key=True)
 
 
 class ChatMessage(SQLModel, table=True):
@@ -103,4 +103,4 @@ class RateLimitEntry(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, sa_column=Column(DateTime(timezone=True), server_default=func.now()))
     
     # Primary key
-    id: int = Field(primary_key=True) 
+    id: Optional[int] = Field(default=None, primary_key=True) 
