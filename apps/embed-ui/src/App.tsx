@@ -47,15 +47,13 @@ function App() {
 
   const authenticateWithBackend = async (context: string, signature: string) => {
     try {
-      // Decode the base64 context
-      const decodedContext = atob(context)
-      
-      const response = await fetch('https://fub-followup-assistant-production.up.railway.app/auth/iframe-login', {
+      // Send the original base64 context for HMAC verification
+      const response = await fetch('https://fub-followup-assistant-production.up.railway.app/auth/fub/callback', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ context: decodedContext, signature })
+        body: JSON.stringify({ context, signature })
       })
 
       if (!response.ok) {
@@ -65,7 +63,8 @@ function App() {
 
       const data = await response.json()
       
-      // Parse the context to get lead info
+      // Decode the base64 context locally to get lead info
+      const decodedContext = atob(context)
       const contextData = JSON.parse(decodedContext)
       const person = contextData.person
 
