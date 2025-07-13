@@ -94,6 +94,96 @@ async def root() -> Dict[str, str]:
         "status": "running"
     }
 
+@app.post("/api/v1/setup-db")
+async def setup_database() -> Dict[str, Any]:
+    """Initialize database tables and indexes."""
+    global db_pool
+    
+    if not db_pool:
+        return {"error": "Database pool not initialized"}
+    
+    # Database initialization SQL
+    init_sql = """
+    -- Enable required extensions
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+    -- Create accounts table
+    CREATE TABLE IF NOT EXISTS accounts (
+        account_id SERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        fub_access_token TEXT,
+        fub_account_id VARCHAR(255) UNIQUE NOT NULL,
+        fub_refresh_token TEXT,
+        stripe_customer_id VARCHAR(255),
+        subscription_status VARCHAR(50) DEFAULT 'trialing',
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create chat_messages table
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        answer TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        person_id VARCHAR(255) NOT NULL,
+        question TEXT NOT NULL,
+        role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant'))
+    );
+
+    -- Create rate_limit_entries table
+    CREATE TABLE IF NOT EXISTS rate_limit_entries (
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        id SERIAL PRIMARY KEY,
+        identifier VARCHAR(255) NOT NULL,
+        request_count INTEGER DEFAULT 1,
+        window_start TIMESTAMP WITH TIME ZONE NOT NULL
+    );
+
+    -- Create indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_accounts_fub_account_id ON accounts(fub_account_id);
+    CREATE INDEX IF NOT EXISTS idx_accounts_stripe_customer_id ON accounts(stripe_customer_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_person_id ON chat_messages(person_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_rate_limit_entries_identifier ON rate_limit_entries(identifier);
+    CREATE INDEX IF NOT EXISTS idx_rate_limit_entries_window_start ON rate_limit_entries(window_start);
+
+    -- Create function to update updated_at timestamp
+    CREATE OR REPLACE FUNCTION update_updated_at_column()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = CURRENT_TIMESTAMP;
+        RETURN NEW;
+    END;
+    $$ language 'plpgsql';
+
+    -- Create trigger for accounts table
+    CREATE TRIGGER update_accounts_updated_at 
+        BEFORE UPDATE ON accounts 
+        FOR EACH ROW 
+        EXECUTE FUNCTION update_updated_at_column();
+    """
+    
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(init_sql)
+            
+            # Verify tables were created
+            tables = await conn.fetch("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """)
+            
+            return {
+                "status": "success",
+                "message": "Database initialized successfully",
+                "tables_created": [row["table_name"] for row in tables]
+            }
+    except Exception as e:
+        print(f"Database setup failed: {e}")
+        return {"error": str(e), "status": "failed"}
+
+
 # Test database endpoint
 @app.get("/api/v1/test-db")
 async def test_database() -> Dict[str, Any]:
