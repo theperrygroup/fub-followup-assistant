@@ -26,11 +26,19 @@ from config import settings
 def verify_hmac_signature(context: str, signature: str) -> bool:
     """Verify HMAC signature from Follow Up Boss iframe."""
     try:
+        logger.info(f"=== SIGNATURE VERIFICATION DEBUG ===")
+        logger.info(f"Input signature: {signature}")
+        logger.info(f"Secret length: {len(settings.fub_embed_secret)}")
+        logger.info(f"Secret: {settings.fub_embed_secret}")
+        
         expected_signature = hmac.new(
             settings.fub_embed_secret.encode(),
             context.encode(),
             hashlib.sha256
         ).hexdigest()
+        
+        logger.info(f"Expected signature: {expected_signature}")
+        logger.info(f"Signatures match: {hmac.compare_digest(signature, expected_signature)}")
         
         return hmac.compare_digest(signature, expected_signature)
     except Exception as e:
