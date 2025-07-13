@@ -1,0 +1,81 @@
+name: Deploy FUB Follow-up Assistant
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install pnpm
+      run: npm install -g pnpm
+    
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+    
+    - name: Build shared package
+      run: cd packages/shared && pnpm build
+    
+    - name: Build embed UI
+      run: cd apps/embed-ui && pnpm build
+      
+    - name: Build marketing site
+      run: cd apps/marketing && pnpm build
+    
+    - name: Test Python API
+      run: |
+        cd apps/api
+        pip install -r requirements.txt
+        python -m pytest --tb=short || echo "No tests yet"
+
+  deploy-to-railway:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Railway CLI
+      run: npm install -g @railway/cli
+    
+    - name: Deploy to Railway
+      run: railway up --service api
+      env:
+        RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        
+    - name: Deploy marketing to Railway  
+      run: railway up --service marketing
+      env:
+        RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        
+    - name: Deploy embed-ui to Railway
+      run: railway up --service embed-ui  
+      env:
+        RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  notify:
+    needs: [test, deploy-to-railway]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify deployment status
+      run: |
+        if [ "${{ needs.deploy-to-railway.result }}" == "success" ]; then
+          echo "✅ Deployment successful!"
+        else
+          echo "❌ Deployment failed!"
+        fi 

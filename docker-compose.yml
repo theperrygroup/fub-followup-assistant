@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: fub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fub_assistant
+      POSTGRES_USER: fubuser
+      POSTGRES_PASSWORD: fubpass123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fubuser -d fub_assistant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: fub-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: fub-api
+    restart: unless-stopped
+    environment:
+      # Database
+      DATABASE_URL: postgresql://fubuser:fubpass123@postgres:5432/fub_assistant
+      
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      
+      # Application
+      APP_ENV: development
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      LOG_LEVEL: INFO
+      
+      # Security
+      SECRET_KEY: dev-secret-key-change-in-production
+      FUB_WEBHOOK_SECRET: dev-webhook-secret
+      
+      # OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      
+      # Stripe
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      
+      # Follow Up Boss
+      FUB_CLIENT_ID: ${FUB_CLIENT_ID}
+      FUB_CLIENT_SECRET: ${FUB_CLIENT_SECRET}
+      
+      # CORS
+      ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:3001,http://localhost:5173"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/api:/app:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # React Embed UI
+  embed-ui:
+    build:
+      context: ./apps/embed-ui
+      dockerfile: Dockerfile
+    container_name: fub-embed-ui
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+
+  # Next.js Marketing Site
+  marketing:
+    build:
+      context: ./apps/marketing
+      dockerfile: Dockerfile
+    container_name: fub-marketing
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_BASE_URL: http://api:8000
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: dev-nextauth-secret
+    ports:
+      - "3001:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: fub-assistant-network 

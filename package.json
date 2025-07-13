@@ -1,0 +1,21 @@
+{
+  "name": "fub-followup-assistant",
+  "version": "1.0.0",
+  "description": "AI follow-up SaaS for Follow Up Boss",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r --parallel run dev",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test",
+    "type-check": "pnpm -r run type-check"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+} 

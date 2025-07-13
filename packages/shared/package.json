@@ -1,0 +1,26 @@
+{
+  "name": "@fub-assistant/shared",
+  "version": "1.0.0",
+  "description": "Shared TypeScript types and utilities for FUB Follow-up Assistant",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src --ext .ts,.tsx",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.48",
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
+    "@typescript-eslint/parser": "^6.19.1",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0"
+  }
+} 
