@@ -441,6 +441,12 @@ async def fub_callback(request: IframeLoginRequest) -> IframeLoginResponse:
     return await iframe_login(request)
 
 
+@app.post("/auth/fub/callback", response_model=IframeLoginResponse)
+async def fub_callback_alt(request: IframeLoginRequest) -> IframeLoginResponse:
+    """Alternative FUB callback endpoint - handles /auth/fub/callback path."""
+    return await iframe_login(request)
+
+
 @app.post("/api/v1/fub/note")
 async def create_fub_note() -> Dict[str, str]:
     """Placeholder FUB note creation endpoint."""
