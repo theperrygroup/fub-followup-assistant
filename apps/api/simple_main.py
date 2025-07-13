@@ -413,14 +413,14 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
         
         # Create JWT token
         token = create_jwt_token(
-            account_id=account["id"],
+            account_id=account["account_id"],
             fub_account_id=fub_account_id
         )
         
         return IframeLoginResponse(
-            account_id=account["id"],
+            account_id=account["account_id"],
             fub_account_id=fub_account_id,
-            subscription_status="active",
+            subscription_status=account["subscription_status"],
             token=token
         )
         
