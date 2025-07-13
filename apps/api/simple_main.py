@@ -366,9 +366,13 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
         
         # Parse context data
         try:
-            context_data = json.loads(request.context)
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse context JSON: {request.context}")
+            # Decode base64 context first, then parse JSON
+            import base64
+            import binascii
+            decoded_context = base64.b64decode(request.context).decode('utf-8')
+            context_data = json.loads(decoded_context)
+        except (json.JSONDecodeError, binascii.Error, UnicodeDecodeError) as e:
+            logger.error(f"Failed to parse context data: {e}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid context data"
