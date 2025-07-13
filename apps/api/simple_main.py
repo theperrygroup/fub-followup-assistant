@@ -97,30 +97,65 @@ async def root() -> Dict[str, str]:
 # Test database endpoint
 @app.get("/api/v1/test-db")
 async def test_database() -> Dict[str, Any]:
-    """Test database connectivity and show sample data."""
+    """Test database connectivity and return sample data."""
+    global db_pool
+    
+    if not db_pool:
+        return {"error": "Database pool not initialized"}
+    
     try:
-        if db_pool is None:
-            raise Exception("Database pool not initialized")
         async with db_pool.acquire() as conn:
-            # Get database version
-            version = await conn.fetchval('SELECT version()')
+            # Test basic connectivity
+            test_result = await conn.fetchval("SELECT 1 as test")
             
-            # Get accounts count
-            account_count = await conn.fetchval('SELECT COUNT(*) FROM accounts')
+            # Get table info
+            tables = await conn.fetch("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """)
             
-            # Get a sample account (safely)
-            sample_account = await conn.fetchrow(
-                'SELECT account_id, fub_account_id, subscription_status FROM accounts LIMIT 1'
-            )
+            # Get account count
+            account_count = await conn.fetchval("SELECT COUNT(*) FROM accounts")
             
             return {
-                "database_version": version,
-                "accounts_count": account_count,
-                "sample_account": dict(sample_account) if sample_account else None,
-                "tables": ["accounts", "chat_messages", "rate_limit_entries"]
+                "database_test": test_result,
+                "tables": [row["table_name"] for row in tables],
+                "account_count": account_count,
+                "status": "connected"
             }
     except Exception as e:
-        return {"error": str(e)}
+        print(f"Database test failed: {e}")
+        return {"error": str(e), "status": "failed"}
+
+
+# Basic authentication endpoints
+@app.post("/api/v1/auth/iframe-login")
+async def iframe_login() -> Dict[str, str]:
+    """Placeholder iframe login endpoint."""
+    return {
+        "message": "Iframe login endpoint - implementation needed",
+        "status": "placeholder"
+    }
+
+
+@app.post("/api/v1/fub/note")
+async def create_fub_note() -> Dict[str, str]:
+    """Placeholder FUB note creation endpoint."""
+    return {
+        "message": "FUB note creation endpoint - implementation needed", 
+        "status": "placeholder"
+    }
+
+
+@app.post("/api/v1/chat/message")
+async def chat_message() -> Dict[str, str]:
+    """Placeholder chat message endpoint."""
+    return {
+        "message": "Chat message endpoint - implementation needed",
+        "status": "placeholder"
+    }
 
 if __name__ == "__main__":
     import uvicorn
