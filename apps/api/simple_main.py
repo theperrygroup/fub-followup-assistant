@@ -380,10 +380,21 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
             # Decode base64 context first, then parse JSON
             import base64
             import binascii
-            decoded_context = base64.b64decode(request.context).decode('utf-8')
+            
+            # Fix base64 padding if needed (like the working app does)
+            context_str = request.context
+            padding = 4 - (len(context_str) % 4)
+            if padding != 4:
+                context_str += '=' * padding
+            
+            decoded_context = base64.b64decode(context_str).decode('utf-8')
             context_data = json.loads(decoded_context)
+            
+            logger.info(f"Successfully decoded context: {json.dumps(context_data, indent=2)}")
+            
         except (json.JSONDecodeError, binascii.Error, UnicodeDecodeError) as e:
             logger.error(f"Failed to parse context data: {e}")
+            logger.error(f"Context string: {request.context[:100]}...")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid context data"
