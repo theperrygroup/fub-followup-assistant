@@ -5,7 +5,8 @@ This module sets up the FastAPI application with working database connectivity.
 
 import sys
 import asyncio
-from typing import Dict, Any
+from contextlib import asynccontextmanager
+from typing import Dict, Any, AsyncGenerator
 
 import asyncpg
 from fastapi import FastAPI, Request, Response
@@ -28,33 +29,13 @@ logger.add(
 # Database connection pool
 db_pool = None
 
-# Create FastAPI application
-app = FastAPI(
-    title="FUB Follow-up Assistant API",
-    description="AI-powered follow-up assistant for Follow Up Boss CRM",
-    version="1.0.0",
-    docs_url="/docs" if settings.app_env != "prod" else None,
-    redoc_url="/redoc" if settings.app_env != "prod" else None
-)
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "*.followupboss.com",
-        settings.frontend_embed_origin,
-        settings.marketing_origin
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
-)
-
-
-@app.on_event("startup")
-async def startup():
-    """Initialize database connection pool."""
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan manager."""
     global db_pool
+    
+    # Startup
     logger.info("Starting FUB Follow-up Assistant API")
     
     # Parse the DATABASE_URL to extract connection parameters
@@ -75,15 +56,37 @@ async def startup():
     except Exception as e:
         logger.error(f"❌ Failed to create database pool: {e}")
         raise
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Close database connection pool."""
-    global db_pool
+    
+    yield
+    
+    # Shutdown
     if db_pool:
         await db_pool.close()
     logger.info("Shutting down FUB Follow-up Assistant API")
+
+
+# Create FastAPI application
+app = FastAPI(
+    title="FUB Follow-up Assistant API",
+    description="AI-powered follow-up assistant for Follow Up Boss CRM",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.app_env != "prod" else None,
+    redoc_url="/redoc" if settings.app_env != "prod" else None
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "*.followupboss.com",
+        settings.frontend_embed_origin,
+        settings.marketing_origin
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*"],
+)
 
 
 @app.middleware("http")
