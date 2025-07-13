@@ -5,18 +5,147 @@ Railway deployment version.
 """
 
 import asyncio
-import contextlib
-from typing import Dict, Any
+import hashlib
+import hmac
+import json
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
 
 import asyncpg
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from jose import JWTError, jwt
+from loguru import logger
+from pydantic import BaseModel, Field
+
 from config import settings
+
+
+# Auth utility functions
+def verify_hmac_signature(context: str, signature: str) -> bool:
+    """Verify HMAC signature from Follow Up Boss iframe."""
+    try:
+        expected_signature = hmac.new(
+            settings.fub_embed_secret.encode(),
+            context.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        return hmac.compare_digest(signature, expected_signature)
+    except Exception as e:
+        logger.error(f"HMAC verification error: {e}")
+        return False
+
+
+def create_jwt_token(account_id: int, fub_account_id: str, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a JWT token for the authenticated user."""
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(hours=24)
+    
+    to_encode = {
+        "account_id": account_id,
+        "fub_account_id": fub_account_id,
+        "exp": expire
+    }
+    
+    return jwt.encode(to_encode, settings.jwt_secret, algorithm="HS256")
+
+
+def verify_jwt_token(token: str) -> dict:
+    """Verify and decode a JWT token."""
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+        return payload
+    except JWTError as e:
+        logger.error(f"JWT verification error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+
+
+# Request/Response models
+class IframeLoginRequest(BaseModel):
+    """Request model for iframe login."""
+    context: str = Field(..., description="Context data from FUB iframe")
+    signature: str = Field(..., description="HMAC signature")
+
+
+class IframeLoginResponse(BaseModel):
+    """Response model for iframe login."""
+    account_id: int = Field(..., description="Internal account ID")
+    fub_account_id: str = Field(..., description="Follow Up Boss account ID")
+    subscription_status: str = Field(..., description="Subscription status")
+    token: str = Field(..., description="JWT token")
+
+# Database helper functions
+async def get_account_by_fub_id(fub_account_id: str) -> Optional[Dict[str, Any]]:
+    """Get account by FUB account ID."""
+    global db_pool
+    
+    if not db_pool:
+        return None
+    
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT account_id, fub_account_id, subscription_status, created_at, updated_at "
+                "FROM accounts WHERE fub_account_id = $1",
+                fub_account_id
+            )
+            return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Error getting account by FUB ID {fub_account_id}: {e}")
+        return None
+
+
+async def create_or_update_account(fub_account_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+    """Create or update account in database."""
+    global db_pool
+    
+    if not db_pool:
+        return None
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Try to get existing account
+            existing = await conn.fetchrow(
+                "SELECT account_id, fub_account_id, subscription_status FROM accounts WHERE fub_account_id = $1",
+                fub_account_id
+            )
+            
+            if existing:
+                # Update existing account
+                row = await conn.fetchrow(
+                    """UPDATE accounts 
+                       SET updated_at = CURRENT_TIMESTAMP
+                       WHERE fub_account_id = $1 
+                       RETURNING account_id, fub_account_id, subscription_status""",
+                    fub_account_id
+                )
+            else:
+                # Create new account
+                subscription_status = kwargs.get('subscription_status', 'trialing')
+                row = await conn.fetchrow(
+                    """INSERT INTO accounts (fub_account_id, subscription_status) 
+                       VALUES ($1, $2) 
+                       RETURNING account_id, fub_account_id, subscription_status""",
+                    fub_account_id, subscription_status
+                )
+            
+            return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Error creating/updating account {fub_account_id}: {e}")
+        return None
+
 
 # Database connection pool
 db_pool = None
 
-@contextlib.asynccontextmanager
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events."""
     # Startup
@@ -223,13 +352,65 @@ async def test_database() -> Dict[str, Any]:
 
 
 # Basic authentication endpoints
-@app.post("/api/v1/auth/iframe-login")
-async def iframe_login() -> Dict[str, str]:
-    """Placeholder iframe login endpoint."""
-    return {
-        "message": "Iframe login endpoint - implementation needed",
-        "status": "placeholder"
-    }
+@app.post("/api/v1/auth/iframe-login", response_model=IframeLoginResponse)
+async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
+    """Authenticate iframe request and issue JWT token."""
+    try:
+        # Verify HMAC signature
+        if not verify_hmac_signature(request.context, request.signature):
+            logger.warning(f"Invalid HMAC signature for context: {request.context[:100]}...")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid signature"
+            )
+        
+        # Parse context data
+        try:
+            context_data = json.loads(request.context)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON in context: {request.context[:100]}...")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid context format"
+            )
+        
+        # Extract FUB account ID from context
+        fub_account_id = context_data.get("account", {}).get("id")
+        if not fub_account_id:
+            logger.error("No account ID found in context")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing account ID in context"
+            )
+        
+        # Create or update account
+        account = await create_or_update_account(str(fub_account_id))
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create or update account"
+            )
+        
+        # Create JWT token
+        token = create_jwt_token(account["account_id"], account["fub_account_id"])
+        
+        logger.info(f"Successfully authenticated FUB account: {fub_account_id}")
+        
+        return IframeLoginResponse(
+            account_id=account["account_id"],
+            fub_account_id=account["fub_account_id"],
+            subscription_status=account["subscription_status"],
+            token=token
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Iframe login error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication failed"
+        )
 
 
 @app.post("/api/v1/fub/note")
