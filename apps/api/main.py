@@ -15,6 +15,9 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from config import settings
+from routes.auth import router as auth_router
+from routes.chat import router as chat_router
+from routes.fub import router as fub_router
 
 
 # Configure logging
@@ -87,6 +90,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+# Mount routers
+app.include_router(auth_router)
+app.include_router(chat_router, prefix="/api/v1")
+app.include_router(fub_router, prefix="/api/v1")
 
 
 @app.middleware("http")
@@ -207,34 +215,6 @@ async def test_database() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Database test failed: {e}")
         return {"error": str(e), "status": "failed"}
-
-
-# Basic authentication endpoints
-@app.post("/api/v1/auth/iframe-login")
-async def iframe_login() -> Dict[str, str]:
-    """Placeholder iframe login endpoint."""
-    return {
-        "message": "Iframe login endpoint - implementation needed",
-        "status": "placeholder"
-    }
-
-
-@app.post("/api/v1/fub/note")
-async def create_fub_note() -> Dict[str, str]:
-    """Placeholder FUB note creation endpoint."""
-    return {
-        "message": "FUB note creation endpoint - implementation needed", 
-        "status": "placeholder"
-    }
-
-
-@app.post("/api/v1/chat/message")
-async def chat_message() -> Dict[str, str]:
-    """Placeholder chat message endpoint."""
-    return {
-        "message": "Chat message endpoint - implementation needed",
-        "status": "placeholder"
-    }
 
 
 if __name__ == "__main__":
