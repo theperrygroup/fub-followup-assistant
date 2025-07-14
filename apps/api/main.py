@@ -212,8 +212,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://fub-followup-assistant-embed-plpgqa2jn.vercel.app",
-        "https://*.followupboss.com", 
-        "http://localhost:*"
+        "https://app.followupboss.com",
+        "https://followupboss.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000"
     ],
     allow_credentials=True,
     allow_methods=["*"],
