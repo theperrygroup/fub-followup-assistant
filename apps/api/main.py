@@ -551,11 +551,58 @@ async def log_requests(request: Request, call_next):
     # Process request
     response = await call_next(request)
     
+    # === X-FRAME-OPTIONS DEBUGGING ===
+    logger.info("=== X-FRAME-OPTIONS HEADER ANALYSIS ===")
+    logger.info(f"Request from: {request.headers.get('origin', 'NO-ORIGIN')}")
+    logger.info(f"User-Agent: {request.headers.get('user-agent', 'NO-USER-AGENT')}")
+    logger.info(f"Referer: {request.headers.get('referer', 'NO-REFERER')}")
+    logger.info(f"X-Forwarded-For: {request.headers.get('x-forwarded-for', 'NO-X-FORWARDED-FOR')}")
+    
+    # Check all possible X-Frame-Options variations BEFORE removal
+    frame_headers_before = {}
+    for header_name in response.headers:
+        if 'frame' in header_name.lower():
+            frame_headers_before[header_name] = response.headers[header_name]
+    
+    logger.info(f"Frame-related headers BEFORE removal: {frame_headers_before}")
+    
+    # List ALL response headers for debugging
+    all_headers_before = dict(response.headers)
+    logger.info(f"ALL response headers BEFORE: {all_headers_before}")
+    
     # Remove X-Frame-Options header to allow iframe embedding (like working Flask app)
-    if 'x-frame-options' in response.headers:
-        del response.headers['x-frame-options']
-    if 'X-Frame-Options' in response.headers:
-        del response.headers['X-Frame-Options']
+    headers_removed = []
+    
+    # Check and remove various case combinations
+    possible_frame_headers = [
+        'x-frame-options', 'X-Frame-Options', 'X-FRAME-OPTIONS', 
+        'x-Frame-Options', 'X-frame-options'
+    ]
+    
+    for header_variant in possible_frame_headers:
+        if header_variant in response.headers:
+            old_value = response.headers[header_variant]
+            del response.headers[header_variant]
+            headers_removed.append(f"{header_variant}: {old_value}")
+            logger.info(f"REMOVED header: {header_variant} = {old_value}")
+    
+    if not headers_removed:
+        logger.info("NO X-Frame-Options headers found to remove")
+    else:
+        logger.info(f"Successfully removed headers: {headers_removed}")
+    
+    # Check frame headers AFTER removal
+    frame_headers_after = {}
+    for header_name in response.headers:
+        if 'frame' in header_name.lower():
+            frame_headers_after[header_name] = response.headers[header_name]
+    
+    logger.info(f"Frame-related headers AFTER removal: {frame_headers_after}")
+    
+    # List ALL response headers after removal
+    all_headers_after = dict(response.headers)
+    logger.info(f"ALL response headers AFTER: {all_headers_after}")
+    logger.info("=== END X-FRAME-OPTIONS ANALYSIS ===")
     
     # Log response
     end_time = datetime.utcnow()
