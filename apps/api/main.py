@@ -535,6 +535,11 @@ async def log_requests(request: Request, call_next):
     # Process request
     response = await call_next(request)
     
+    # Remove restrictive headers that prevent iframe embedding
+    # Allow iframe embedding from Follow Up Boss
+    response.headers.pop('X-Frame-Options', None)
+    response.headers.pop('Content-Security-Policy', None)
+    
     # Log response
     end_time = datetime.utcnow()
     duration = (end_time - start_time).total_seconds()
