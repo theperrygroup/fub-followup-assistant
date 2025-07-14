@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 
 import asyncpg
-import jwt
+from jose import jwt
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
