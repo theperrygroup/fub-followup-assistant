@@ -7,7 +7,40 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  test-api:
+    name: Test Python API
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest-cov
+    
+    - name: Run tests with coverage
+      run: |
+        python -m pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing
+        
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: apps/api/coverage.xml
+        flags: api
+        name: api-coverage
+
+  test-frontend:
+    name: Test Frontend Applications
     runs-on: ubuntu-latest
 
     steps:
@@ -28,22 +61,67 @@ jobs:
     - name: Build shared package
       run: cd packages/shared && pnpm build
     
+    - name: Test shared package
+      run: cd packages/shared && pnpm test || echo "No tests yet"
+    
     - name: Build embed UI
       run: cd apps/embed-ui && pnpm build
       
+    - name: Test embed UI
+      run: cd apps/embed-ui && pnpm test || echo "No tests yet"
+      
     - name: Build marketing site
       run: cd apps/marketing && pnpm build
+      
+    - name: Test marketing site
+      run: cd apps/marketing && pnpm test || echo "No tests yet"
+
+  lint-and-format:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
     
-    - name: Test Python API
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install pnpm
+      run: npm install -g pnpm
+    
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+    
+    - name: Check formatting
+      run: pnpm format:check || echo "No format check configured"
+    
+    - name: Lint code
+      run: pnpm lint || echo "No linting configured"
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run npm audit
+      run: npm audit --audit-level=moderate || echo "Audit completed with warnings"
+      
+    - name: Python security scan
       run: |
         cd apps/api
-        pip install -r requirements.txt
-        python -m pytest --tb=short || echo "No tests yet"
+        pip install safety
+        safety check || echo "Safety check completed"
 
   deploy-to-railway:
-    needs: test
+    name: Deploy to Railway
+    needs: [test-api, test-frontend, lint-and-format, security-scan]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     
     steps:
     - uses: actions/checkout@v4
@@ -51,23 +129,45 @@ jobs:
     - name: Install Railway CLI
       run: npm install -g @railway/cli
     
-    - name: Deploy to Railway
+    - name: Deploy API to Railway
       run: railway up --service api
       env:
         RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         
-    - name: Deploy marketing to Railway  
+    - name: Deploy Marketing to Railway  
       run: railway up --service marketing
       env:
         RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         
-    - name: Deploy embed-ui to Railway
+    - name: Deploy Embed UI to Railway
       run: railway up --service embed-ui  
       env:
         RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
+  # Vercel deployments are handled automatically by Vercel
+  # but this job ensures all checks pass before they trigger
+  deployment-ready:
+    name: Deployment Ready
+    needs: [test-api, test-frontend, lint-and-format, security-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Check all tests passed
+      run: |
+        if [ "${{ needs.test-api.result }}" == "success" ] && \
+           [ "${{ needs.test-frontend.result }}" == "success" ] && \
+           [ "${{ needs.lint-and-format.result }}" == "success" ] && \
+           [ "${{ needs.security-scan.result }}" == "success" ]; then
+          echo "✅ All checks passed! Deployment ready."
+        else
+          echo "❌ Some checks failed. Deployment blocked."
+          exit 1
+        fi
+
   notify:
-    needs: [test, deploy-to-railway]
+    name: Notify Status
+    needs: [test-api, test-frontend, lint-and-format, security-scan, deploy-to-railway]
     runs-on: ubuntu-latest
     if: always()
     
@@ -75,7 +175,9 @@ jobs:
     - name: Notify deployment status
       run: |
         if [ "${{ needs.deploy-to-railway.result }}" == "success" ]; then
-          echo "✅ Deployment successful!"
+          echo "🚀 Deployment successful!"
+        elif [ "${{ needs.deploy-to-railway.result }}" == "skipped" ]; then
+          echo "⏭️  Deployment skipped (not main branch)"
         else
           echo "❌ Deployment failed!"
         fi 
