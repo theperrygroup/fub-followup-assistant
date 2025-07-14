@@ -31,22 +31,35 @@ def verify_hmac_signature(context: str, signature: str) -> bool:
         logger.info("=== HMAC VERIFICATION START ===")
         logger.info(f"Secret key (first 10 chars): {secret_key[:10]}...")
         logger.info(f"Context length: {len(context)}")
+        logger.info(f"Context type: {type(context)}")
         logger.info(f"Context (first 100 chars): {context[:100]}")
         logger.info(f"Context (last 100 chars): {context[-100:] if len(context) > 100 else 'N/A - context too short'}")
         logger.info(f"Provided signature: {signature}")
         logger.info(f"Signature length: {len(signature)}")
         
-        expected_signature = hmac.new(
-            secret_key.encode(),
-            context.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        logger.info("Starting HMAC calculation...")
+        try:
+            expected_signature = hmac.new(
+                secret_key.encode(),
+                context.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            logger.info("HMAC calculation completed")
+            logger.info(f"Expected signature: {expected_signature}")
+        except Exception as hmac_error:
+            logger.error(f"HMAC calculation failed: {hmac_error}")
+            raise
         
-        logger.info(f"Expected signature: {expected_signature}")
-        logger.info(f"Signatures match: {hmac.compare_digest(signature, expected_signature)}")
+        try:
+            match_result = hmac.compare_digest(signature, expected_signature)
+            logger.info(f"Signatures match: {match_result}")
+        except Exception as compare_error:
+            logger.error(f"Signature comparison failed: {compare_error}")
+            raise
+            
         logger.info("=== HMAC VERIFICATION END ===")
         
-        return hmac.compare_digest(signature, expected_signature)
+        return match_result
     except Exception as e:
         logger.error(f"HMAC verification error: {e}")
         return False
