@@ -210,7 +210,11 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://*.followupboss.com", "http://localhost:*", "https://*.vercel.app"],
+    allow_origins=[
+        "https://fub-followup-assistant-embed-plpgqa2jn.vercel.app",
+        "https://*.followupboss.com", 
+        "http://localhost:*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
