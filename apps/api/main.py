@@ -100,7 +100,7 @@ async def get_account_by_fub_id(fub_account_id: str) -> Optional[Dict[str, Any]]
     """Get account by FUB account ID."""
     try:
         query = """
-        SELECT id, fub_account_id, subscription_status, created_at, updated_at
+        SELECT account_id, fub_account_id, subscription_status, created_at, updated_at
         FROM accounts 
         WHERE fub_account_id = $1
         """
@@ -129,7 +129,7 @@ async def create_or_update_account(fub_account_id: str, **kwargs) -> Optional[Di
             UPDATE accounts 
             SET updated_at = CURRENT_TIMESTAMP
             WHERE fub_account_id = $1
-            RETURNING id, fub_account_id, subscription_status, created_at, updated_at
+            RETURNING account_id, fub_account_id, subscription_status, created_at, updated_at
             """
             
             result = await db_pool.fetchrow(update_query, fub_account_id)
@@ -141,10 +141,10 @@ async def create_or_update_account(fub_account_id: str, **kwargs) -> Optional[Di
             insert_query = """
             INSERT INTO accounts (fub_account_id, subscription_status)
             VALUES ($1, $2)
-            RETURNING id, fub_account_id, subscription_status, created_at, updated_at
+            RETURNING account_id, fub_account_id, subscription_status, created_at, updated_at
             """
             
-            result = await db_pool.fetchrow(insert_query, fub_account_id, "trial")
+            result = await db_pool.fetchrow(insert_query, fub_account_id, "trialing")
             return dict(result) if result else None
             
     except Exception as e:
@@ -265,39 +265,66 @@ async def setup_database() -> Dict[str, Any]:
             raise HTTPException(status_code=500, detail="Database not connected")
         
         async with db_pool.acquire() as connection:
-            # Create accounts table
+            # Create accounts table (matching original schema)
             await connection.execute("""
                 CREATE TABLE IF NOT EXISTS accounts (
-                    id SERIAL PRIMARY KEY,
+                    account_id SERIAL PRIMARY KEY,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    fub_access_token TEXT,
                     fub_account_id VARCHAR(255) UNIQUE NOT NULL,
-                    subscription_status VARCHAR(50) DEFAULT 'trial',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    fub_refresh_token TEXT,
+                    stripe_customer_id VARCHAR(255),
+                    subscription_status VARCHAR(50) DEFAULT 'trialing',
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
-            # Create conversations table  
+            # Create chat_messages table (matching original schema)
             await connection.execute("""
-                CREATE TABLE IF NOT EXISTS conversations (
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    answer TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    person_id VARCHAR(255) NOT NULL,
+                    question TEXT NOT NULL,
+                    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant'))
+                )
+            """)
+            
+            # Create rate_limit_entries table
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS rate_limit_entries (
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     id SERIAL PRIMARY KEY,
-                    account_id INTEGER REFERENCES accounts(id),
-                    fub_person_id VARCHAR(255),
-                    messages JSONB DEFAULT '[]',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    identifier VARCHAR(255) NOT NULL,
+                    request_count INTEGER DEFAULT 1,
+                    window_start TIMESTAMP WITH TIME ZONE NOT NULL
                 )
             """)
             
-            # Create index on fub_account_id for faster lookups
+            # Create indexes for better performance
             await connection.execute("""
-                CREATE INDEX IF NOT EXISTS idx_accounts_fub_account_id 
-                ON accounts(fub_account_id)
+                CREATE INDEX IF NOT EXISTS idx_accounts_fub_account_id ON accounts(fub_account_id)
             """)
             
-            # Create index on conversations for faster lookups
             await connection.execute("""
-                CREATE INDEX IF NOT EXISTS idx_conversations_account_person 
-                ON conversations(account_id, fub_person_id)
+                CREATE INDEX IF NOT EXISTS idx_accounts_stripe_customer_id ON accounts(stripe_customer_id)
+            """)
+            
+            await connection.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chat_messages_person_id ON chat_messages(person_id)
+            """)
+            
+            await connection.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at)
+            """)
+            
+            await connection.execute("""
+                CREATE INDEX IF NOT EXISTS idx_rate_limit_entries_identifier ON rate_limit_entries(identifier)
+            """)
+            
+            await connection.execute("""
+                CREATE INDEX IF NOT EXISTS idx_rate_limit_entries_window_start ON rate_limit_entries(window_start)
             """)
         
         logger.info("Database setup completed successfully")
@@ -322,17 +349,17 @@ async def test_database() -> Dict[str, Any]:
             # Get table counts
             try:
                 account_count = await connection.fetchval("SELECT COUNT(*) FROM accounts")
-                conversation_count = await connection.fetchval("SELECT COUNT(*) FROM conversations")
+                chat_message_count = await connection.fetchval("SELECT COUNT(*) FROM chat_messages")
             except Exception:
                 # Tables might not exist yet
                 account_count = "N/A (table not found)"
-                conversation_count = "N/A (table not found)"
+                chat_message_count = "N/A (table not found)"
             
             return {
                 "status": "success",
                 "database_test": test_result,
                 "account_count": account_count,
-                "conversation_count": conversation_count,
+                "chat_message_count": chat_message_count,
                 "pool_size": len(db_pool._holders) if hasattr(db_pool, '_holders') else "unknown"
             }
             
@@ -419,7 +446,7 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
         
         # Create JWT token
         token = create_jwt_token(
-            account_id=account["id"],
+            account_id=account["account_id"],
             fub_account_id=fub_account_id,
             expires_delta=timedelta(hours=24)
         )
@@ -428,7 +455,7 @@ async def iframe_login(request: IframeLoginRequest) -> IframeLoginResponse:
         logger.info("=== IFRAME LOGIN SUCCESS ===")
         
         return IframeLoginResponse(
-            account_id=account["id"],
+            account_id=account["account_id"],
             fub_account_id=fub_account_id,
             subscription_status=account["subscription_status"],
             token=token
