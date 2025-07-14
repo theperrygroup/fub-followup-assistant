@@ -551,7 +551,12 @@ async def log_requests(request: Request, call_next):
     # Process request
     response = await call_next(request)
     
-    # Note: No header manipulation needed - FastAPI CORS middleware handles everything
+    # Remove X-Frame-Options header to allow iframe embedding (like working Flask app)
+    if 'x-frame-options' in response.headers:
+        del response.headers['x-frame-options']
+    if 'X-Frame-Options' in response.headers:
+        del response.headers['X-Frame-Options']
+    
     # Log response
     end_time = datetime.utcnow()
     duration = (end_time - start_time).total_seconds()
