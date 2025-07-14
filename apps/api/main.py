@@ -14,11 +14,22 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 from jose import jwt
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
+
+# Import necessary modules for chat functionality
+try:
+    from utils import check_rate_limit
+except ImportError as e:
+    logger.warning(f"Import error for utils: {e}. Rate limiting may not work.")
+    
+    # Fallback rate limiting function
+    async def check_rate_limit(key: str, max_requests: int, window_minutes: int = 1) -> bool:
+        """Fallback rate limiting - always allow requests."""
+        return True
 
 
 # Auth utility functions
@@ -512,13 +523,124 @@ async def create_fub_note() -> Dict[str, str]:
     }
 
 
-@app.post("/api/v1/chat/message")
-async def chat_message() -> Dict[str, str]:
-    """Placeholder chat message endpoint."""
-    return {
-        "message": "Chat message endpoint - implementation needed",
-        "status": "placeholder"
-    }
+class ChatMessageRequest(BaseModel):
+    """Request model for chat message endpoint."""
+    message: str = Field(..., description="User's message")
+    lead_context: dict = Field(..., description="Lead context information")
+
+
+class ChatMessageResponse(BaseModel):
+    """Response model for chat message endpoint."""
+    response: str = Field(..., description="AI response")
+
+
+async def get_current_user_from_token(authorization: str = Header(None)) -> dict:
+    """Extract and verify user from JWT token."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    
+    token = authorization.split(" ")[1]
+    return verify_jwt_token(token)
+
+
+async def get_account_from_token(authorization: str = Header(None)) -> Optional[Dict[str, Any]]:
+    """Get account information from JWT token."""
+    user_payload = await get_current_user_from_token(authorization)
+    fub_account_id = user_payload.get("fub_account_id")
+    
+    if not fub_account_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    
+    account = await get_account_by_fub_id(fub_account_id)
+    if not account:
+        raise HTTPException(status_code=401, detail="Account not found")
+    
+    return account
+
+
+async def apply_chat_rate_limiting(request: Request, account: dict) -> None:
+    """Apply rate limiting to chat requests."""
+    # Account-based rate limiting (10 requests per minute)
+    account_rate_limit_key = f"account:{account['account_id']}"
+    if not await check_rate_limit(account_rate_limit_key, max_requests=10, window_minutes=1):
+        logger.warning(f"Account rate limit exceeded for account {account['fub_account_id']}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Account rate limit exceeded. Please wait before making another request."
+        )
+    
+    # IP-based rate limiting (100 requests per minute)
+    client_ip = request.client.host if request.client else "unknown"
+    ip_rate_limit_key = f"ip:{client_ip}"
+    if not await check_rate_limit(ip_rate_limit_key, max_requests=100, window_minutes=1):
+        logger.warning(f"IP rate limit exceeded for IP {client_ip}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="IP rate limit exceeded. Please wait before making another request."
+        )
+
+
+@app.post("/api/v1/chat/message", response_model=ChatMessageResponse)
+async def chat_message(
+    request: Request,
+    chat_request: ChatMessageRequest,
+    authorization: str = Header(None)
+) -> ChatMessageResponse:
+    """Handle chat message and generate AI response."""
+    try:
+        # Get account from token
+        account = await get_account_from_token(authorization)
+        
+        # Check subscription status
+        if account.get("subscription_status") not in ["active", "trialing"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Subscription required. Current status: {account.get('subscription_status')}"
+            )
+        
+        # Apply rate limiting
+        await apply_chat_rate_limiting(request, account)
+        
+        # Validate input
+        if not chat_request.message.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Message cannot be empty"
+            )
+        
+        # Extract person_id from lead_context
+        person_id = str(chat_request.lead_context.get("id"))
+        if not person_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Person ID not found in lead context"
+            )
+        
+        # Generate a simple response for now
+        # TODO: Implement proper AI response generation
+        lead_name = f"{chat_request.lead_context.get('firstName', '')} {chat_request.lead_context.get('lastName', '')}"
+        stage = chat_request.lead_context.get('stage', 'Unknown')
+        
+        # Create a simple response based on the message
+        if "follow" in chat_request.message.lower():
+            response = f"• Consider sending a personalized message to {lead_name} about their current stage: {stage}\n• Check their recent activity and reference something specific\n• Suggest a next step based on their interest level"
+        elif "email" in chat_request.message.lower():
+            response = f"• Draft a personalized email to {lead_name} addressing their current needs\n• Reference their stage ({stage}) and tailor the message accordingly\n• Include a clear call-to-action"
+        else:
+            response = f"• Review {lead_name}'s profile and recent activity\n• Consider their current stage ({stage}) when crafting your approach\n• Personalize your follow-up based on their specific situation"
+        
+        logger.info(f"Chat response generated for account {account['fub_account_id']}, person {person_id}")
+        
+        return ChatMessageResponse(response=response)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat endpoint error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate response"
+        )
 
 
 # Request logging middleware
