@@ -34,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 EXPOSE 8000
 
 # Start the application
-CMD ["python", "simple_main.py"] 
+CMD ["python", "main.py"] 
