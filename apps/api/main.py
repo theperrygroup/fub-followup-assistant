@@ -262,7 +262,8 @@ async def health_check() -> Dict[str, str]:
         return {
             "status": "healthy",
             "database": db_status,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "1.1"
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
