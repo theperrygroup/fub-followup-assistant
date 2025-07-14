@@ -20,16 +20,10 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
-# Import necessary modules for chat functionality
-try:
-    from utils import check_rate_limit
-except ImportError as e:
-    logger.warning(f"Import error for utils: {e}. Rate limiting may not work.")
-    
-    # Fallback rate limiting function
-    async def check_rate_limit(key: str, max_requests: int, window_minutes: int = 1) -> bool:
-        """Fallback rate limiting - always allow requests."""
-        return True
+# Fallback rate limiting function
+async def check_rate_limit(key: str, max_requests: int, window_minutes: int = 1) -> bool:
+    """Fallback rate limiting - always allow requests."""
+    return True
 
 
 # Auth utility functions
