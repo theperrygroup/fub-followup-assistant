@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react'
 
+// Declare FollowUpBoss API types
+declare global {
+  interface Window {
+    FollowUpBoss?: {
+      resizeFrame: (height: number) => void
+    }
+  }
+}
+
 interface LeadInfo {
   id: number
   firstName: string
@@ -36,6 +45,23 @@ function App() {
     console.log('Current hash:', window.location.hash)
     console.log('Document referrer:', document.referrer)
     console.log('User agent:', navigator.userAgent)
+    
+    // Set initial iframe height using FollowUpBoss API
+    console.log('=== IFRAME HEIGHT MANAGEMENT ===')
+    try {
+      if (typeof window.FollowUpBoss !== 'undefined' && window.FollowUpBoss.resizeFrame) {
+        console.log('FollowUpBoss API found, setting initial height')
+        window.FollowUpBoss.resizeFrame(600) // Set initial height to 600px
+      } else {
+        console.log('FollowUpBoss API not available, trying postMessage fallback')
+        // Fallback: Direct postMessage to parent
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'setHeight', height: 600 }, '*')
+        }
+      }
+    } catch (e) {
+      console.error('Error setting iframe height:', e)
+    }
     
     // Check if we're in an iframe
     const isInIframe = window.self !== window.top
@@ -134,6 +160,27 @@ function App() {
     console.log('=== STARTING BACKEND AUTHENTICATION ===')
     authenticateWithBackend(context, signature)
   }, [])
+
+  // Resize iframe when authentication state changes
+  useEffect(() => {
+    if (authState.isAuthenticated || authState.error) {
+      console.log('=== RESIZING IFRAME AFTER AUTH ===')
+      try {
+        const targetHeight = authState.isAuthenticated ? 800 : 400 // Larger for chat, smaller for error
+        if (typeof window.FollowUpBoss !== 'undefined' && window.FollowUpBoss.resizeFrame) {
+          console.log(`Resizing iframe to ${targetHeight}px via FollowUpBoss API`)
+          window.FollowUpBoss.resizeFrame(targetHeight)
+        } else {
+          console.log(`Resizing iframe to ${targetHeight}px via postMessage fallback`)
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'setHeight', height: targetHeight }, '*')
+          }
+        }
+      } catch (e) {
+        console.error('Error resizing iframe after auth:', e)
+      }
+    }
+  }, [authState.isAuthenticated, authState.error])
 
   const authenticateWithBackend = async (context: string, signature: string) => {
     console.log('=== BACKEND AUTHENTICATION START ===')
